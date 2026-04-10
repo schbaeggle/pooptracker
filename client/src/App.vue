@@ -229,7 +229,7 @@ onMounted(() => {
       <Card class-name="border-white/60 bg-white/80 shadow-xl backdrop-blur">
         <CardHeader>
           <CardTitle class-name="text-3xl font-semibold tracking-tight">Pooptracker</CardTitle>
-          <CardDescription>Gruppen-Tracking fuer Stuhlgang mit Bristol-Skala.</CardDescription>
+          <CardDescription>ANALytische reevaluation des Speiseplans, FTH 2026</CardDescription>
         </CardHeader>
       </Card>
 
