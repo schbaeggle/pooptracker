@@ -1,6 +1,19 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import db from './db.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
+const adminPin = String(process.env.ADMIN_PIN || '').trim();
+if (!/^\d{4}$/.test(adminPin)) {
+  throw new Error('ADMIN_PIN fehlt oder ist ungueltig. Bitte eine 4-stellige PIN in server/.env setzen.');
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -30,8 +43,44 @@ function mapEntry(row) {
   };
 }
 
+function getProvidedPin(req) {
+  return String(req.header('x-admin-pin') || '').trim();
+}
+
+function requireAdminPin(req, res, next) {
+  const providedPin = getProvidedPin(req);
+
+  if (!providedPin) {
+    return res.status(401).json({ error: 'Admin-PIN erforderlich.' });
+  }
+
+  if (!/^\d{4}$/.test(providedPin)) {
+    return res.status(400).json({ error: 'Admin-PIN muss 4-stellig sein.' });
+  }
+
+  if (providedPin !== adminPin) {
+    return res.status(403).json({ error: 'Admin-PIN ist falsch.' });
+  }
+
+  return next();
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.post('/api/admin/verify', (req, res) => {
+  const pin = String(req.body?.pin || '').trim();
+
+  if (!/^\d{4}$/.test(pin)) {
+    return res.status(400).json({ error: 'PIN muss 4-stellig sein.' });
+  }
+
+  if (pin !== adminPin) {
+    return res.status(401).json({ error: 'PIN ist falsch.' });
+  }
+
+  return res.json({ ok: true });
 });
 
 app.get('/api/people', (_req, res) => {
@@ -41,7 +90,7 @@ app.get('/api/people', (_req, res) => {
   res.json(people);
 });
 
-app.post('/api/people', (req, res) => {
+app.post('/api/people', requireAdminPin, (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) {
     return res.status(400).json({ error: 'Name ist erforderlich.' });
@@ -58,7 +107,7 @@ app.post('/api/people', (req, res) => {
   }
 });
 
-app.delete('/api/people/:id', (req, res) => {
+app.delete('/api/people/:id', requireAdminPin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     return res.status(400).json({ error: 'Ungueltige ID.' });

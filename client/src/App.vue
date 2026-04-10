@@ -26,6 +26,9 @@ const form = ref({
 
 const newPersonName = ref('');
 const adminError = ref('');
+const adminPinInput = ref('');
+const adminUnlocked = ref(false);
+const adminUnlockError = ref('');
 
 function toDatetimeLocal(date) {
   const d = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -107,12 +110,15 @@ async function addPerson() {
       throw new Error('Name darf nicht leer sein.');
     }
 
-    await api.addPerson(newPersonName.value.trim());
+    await api.addPerson(newPersonName.value.trim(), adminPinInput.value);
     newPersonName.value = '';
     success.value = 'Name hinzugefuegt.';
     await loadPeople();
   } catch (e) {
     adminError.value = e.message;
+    if (String(e.message).toLowerCase().includes('pin')) {
+      adminUnlocked.value = false;
+    }
   }
 }
 
@@ -121,11 +127,33 @@ async function removePerson(id) {
   success.value = '';
 
   try {
-    await api.deletePerson(id);
+    await api.deletePerson(id, adminPinInput.value);
     success.value = 'Name entfernt.';
     await Promise.all([loadPeople(), loadDashboard()]);
   } catch (e) {
     adminError.value = e.message;
+    if (String(e.message).toLowerCase().includes('pin')) {
+      adminUnlocked.value = false;
+    }
+  }
+}
+
+async function unlockAdmin() {
+  adminUnlockError.value = '';
+  adminError.value = '';
+  success.value = '';
+
+  try {
+    if (!/^\d{4}$/.test(adminPinInput.value.trim())) {
+      throw new Error('PIN muss 4-stellig sein.');
+    }
+
+    await api.verifyAdminPin(adminPinInput.value.trim());
+    adminUnlocked.value = true;
+    success.value = 'Admin-Bereich entsperrt.';
+  } catch (e) {
+    adminUnlocked.value = false;
+    adminUnlockError.value = e.message;
   }
 }
 
@@ -248,18 +276,36 @@ onMounted(() => {
     <section v-if="activeTab === 'admin'" class="panel">
       <h2>Namen verwalten</h2>
 
-      <div class="inline-form">
-        <input v-model="newPersonName" type="text" placeholder="Neuer Name" />
-        <button class="primary" @click="addPerson">Hinzufuegen</button>
+      <div v-if="!adminUnlocked" class="admin-lock">
+        <p class="muted">Admin-Bereich ist geschuetzt. Bitte 4-stellige PIN eingeben.</p>
+        <div class="inline-form">
+          <input
+            v-model="adminPinInput"
+            type="password"
+            inputmode="numeric"
+            maxlength="4"
+            autocomplete="off"
+            placeholder="PIN"
+          />
+          <button class="primary" @click="unlockAdmin">Entsperren</button>
+        </div>
+        <p v-if="adminUnlockError" class="error">{{ adminUnlockError }}</p>
       </div>
-      <p v-if="adminError" class="error">{{ adminError }}</p>
 
-      <ul class="list">
-        <li v-for="person in people" :key="person.id">
-          <span>{{ person.name }}</span>
-          <button class="danger" @click="removePerson(person.id)">Entfernen</button>
-        </li>
-      </ul>
+      <template v-else>
+        <div class="inline-form">
+          <input v-model="newPersonName" type="text" placeholder="Neuer Name" />
+          <button class="primary" @click="addPerson">Hinzufuegen</button>
+        </div>
+        <p v-if="adminError" class="error">{{ adminError }}</p>
+
+        <ul class="list">
+          <li v-for="person in people" :key="person.id">
+            <span>{{ person.name }}</span>
+            <button class="danger" @click="removePerson(person.id)">Entfernen</button>
+          </li>
+        </ul>
+      </template>
     </section>
   </main>
 </template>
