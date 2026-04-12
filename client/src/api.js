@@ -1,10 +1,12 @@
 async function request(url, options = {}) {
+  const { headers: optionHeaders, ...restOptions } = options;
+  
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
-      ...(options.headers || {})
+      ...(optionHeaders || {})
     },
-    ...options
+    ...restOptions
   });
 
   if (!response.ok) {

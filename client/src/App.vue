@@ -109,16 +109,23 @@ async function submitEntry() {
   }
 }
 
-async function addPerson() {
+async function addPerson(event) {
+  if (event) {
+    event.preventDefault();
+  }
+  
   adminError.value = '';
   success.value = '';
 
+  const nameValue = newPersonName.value.trim();
+  console.log('DEBUG: nameValue =', nameValue, 'length:', nameValue.length);
+
   try {
-    if (!newPersonName.value.trim()) {
+    if (!nameValue) {
       throw new Error('Name darf nicht leer sein.');
     }
 
-    await api.addPerson(newPersonName.value.trim(), adminPinInput.value);
+    await api.addPerson(nameValue, adminPinInput.value);
     newPersonName.value = '';
     success.value = 'Name hinzugefuegt.';
     await loadPeople();
@@ -533,10 +540,17 @@ onMounted(() => {
           </div>
 
           <template v-else>
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
-              <Input v-model="newPersonName" type="text" placeholder="Neuer Name" />
-              <Button @click="addPerson">Hinzufuegen</Button>
-            </div>
+            <form @submit.prevent="addPerson" class="space-y-3">
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                <input 
+                  v-model="newPersonName" 
+                  type="text" 
+                  placeholder="Neuer Name" 
+                  class="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50" 
+                />
+                <button type="submit" class="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50">Hinzufuegen</button>
+              </div>
+            </form>
 
             <p v-if="adminError" class="text-sm text-red-700">{{ adminError }}</p>
 

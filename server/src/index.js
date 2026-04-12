@@ -25,10 +25,6 @@ app.use(express.json());
 const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
 const clientIndexPath = path.join(clientDistPath, 'index.html');
 
-if (fs.existsSync(clientIndexPath)) {
-  app.use(express.static(clientDistPath));
-}
-
 const bristolLabels = {
   1: 'Typ 1 - separate harte Kloempel',
   2: 'Typ 2 - wurstfoermig, klumpig',
@@ -250,7 +246,9 @@ app.get('/api/dashboard', (_req, res) => {
   res.json({ totalEntries, perPerson, byBristolType, latest, activityDays });
 });
 
+// Static file serving and SPA fallback (must come AFTER API routes)
 if (fs.existsSync(clientIndexPath)) {
+  app.use(express.static(clientDistPath));
   app.get(/^\/(?!api).*/, (_req, res) => {
     res.sendFile(clientIndexPath);
   });
