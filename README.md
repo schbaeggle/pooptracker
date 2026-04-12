@@ -16,10 +16,11 @@ Mobile-first Single-Page-App zum Tracken von Stuhlgang in einer Gruppe.
   - Bristol Stool Scale Typ 1-7
   - optionale Bemerkung
 - Dashboard:
-  - letzte Eintraege
-  - Gesamtanzahl
-  - Eintraege je Person
+  - Uebersicht mit Gesamtanzahl und Top 3 Personen
+  - zeitlicher Verlauf als Heatmap (letzte 2 Wochen)
   - Bristol-Typ-Verteilung
+  - letzte Eintraege
+  - Eintraege je Person
 - Admin-Bereich:
   - Namen hinzufuegen
   - Namen entfernen
@@ -112,3 +113,60 @@ npm start
 ```
 
 Die SQLite-Datei wird automatisch unter `server/data/pooptracker.db` erzeugt.
+
+## Docker (Single Container)
+
+Die App kann in einem einzelnen Container laufen. Der Container:
+
+- baut das Vue-Frontend
+- startet den Express-Server
+- liefert das gebaute Frontend statisch aus
+- stellt die API unter `/api/*` bereit
+
+### Image bauen
+
+```bash
+docker build -t pooptracker:local .
+```
+
+### Container starten
+
+```bash
+docker run -d \
+  --name pooptracker \
+  -p 3000:3000 \
+  -e ADMIN_PIN=1234 \
+  -v pooptracker_data:/app/server/data \
+  pooptracker:local
+```
+
+Danach ist die App unter `http://localhost:3000` erreichbar.
+
+Hinweis:
+- `ADMIN_PIN` ist Pflicht und muss genau 4-stellig numerisch sein.
+
+## Docker Compose
+
+Es gibt eine fertige Compose-Datei unter `docker-compose.yml`.
+
+### Starten
+
+```bash
+docker-compose up -d --build
+```
+
+### Mit eigener PIN
+
+```bash
+ADMIN_PIN=5678 docker-compose up -d --build
+```
+
+### Stoppen
+
+```bash
+docker-compose down
+```
+
+### Datenpersistenz
+
+Die SQLite-Daten liegen in einem benannten Volume `pooptracker_data` und bleiben damit beim Neustart erhalten.

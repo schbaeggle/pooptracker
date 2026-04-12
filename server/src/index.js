@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
@@ -20,6 +21,13 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+const clientDistPath = path.join(__dirname, '..', '..', 'client', 'dist');
+const clientIndexPath = path.join(clientDistPath, 'index.html');
+
+if (fs.existsSync(clientIndexPath)) {
+  app.use(express.static(clientDistPath));
+}
 
 const bristolLabels = {
   1: 'Typ 1 - separate harte Kloempel',
@@ -241,6 +249,12 @@ app.get('/api/dashboard', (_req, res) => {
 
   res.json({ totalEntries, perPerson, byBristolType, latest, activityDays });
 });
+
+if (fs.existsSync(clientIndexPath)) {
+  app.get(/^\/(?!api).*/, (_req, res) => {
+    res.sendFile(clientIndexPath);
+  });
+}
 
 app.listen(port, () => {
   console.log(`Pooptracker API laeuft auf http://localhost:${port}`);

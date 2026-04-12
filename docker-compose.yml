@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pooptracker:local
+    container_name: pooptracker
+    ports:
+      - "3000:3000"
+    environment:
+      ADMIN_PIN: ${ADMIN_PIN:-1234}
+      PORT: 3000
+      NODE_ENV: production
+    volumes:
+      - pooptracker_data:/app/server/data
+    restart: unless-stopped
+
+volumes:
+  pooptracker_data:
