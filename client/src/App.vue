@@ -138,6 +138,13 @@ async function addPerson(event) {
 }
 
 async function removePerson(id) {
+  const person = people.value.find(p => p.id === id);
+  const personName = person?.name || 'unbekannt';
+
+  if (!window.confirm(`Soll "${personName}" wirklich gelöscht werden? Dies lässt sich nicht rückgängig machen.`)) {
+    return;
+  }
+
   adminError.value = '';
   success.value = '';
 
