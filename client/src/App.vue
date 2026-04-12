@@ -24,7 +24,8 @@ const dashboard = ref({
   totalEntries: 0,
   perPerson: [],
   byBristolType: [],
-  latest: []
+  latest: [],
+  activityDays: []
 });
 
 const form = ref({
@@ -218,6 +219,84 @@ const bristolDistribution = computed(() => {
   }));
 });
 
+const topPeople = computed(() => dashboard.value.perPerson.filter((row) => row.count > 0).slice(0, 3));
+
+function activityLevelClass(level) {
+  if (level <= 0) return 'bg-slate-200';
+  if (level === 1) return 'bg-emerald-200';
+  if (level === 2) return 'bg-emerald-300';
+  if (level === 3) return 'bg-emerald-500';
+  return 'bg-emerald-700';
+}
+
+function activityTextClass(level) {
+  return level >= 3 ? 'text-white/95' : 'text-slate-700';
+}
+
+const activityHeatmap = computed(() => {
+  const totalDays = 14;
+  const sourceDays = Array.isArray(dashboard.value.activityDays) ? dashboard.value.activityDays : [];
+  const countByDate = new Map(sourceDays.map((item) => [item.date, item.count]));
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(today.getDate() - (totalDays - 1));
+
+  const days = [];
+  for (let i = 0; i < totalDays; i += 1) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    const dateKey = date.toISOString().slice(0, 10);
+    const count = countByDate.get(dateKey) ?? 0;
+
+    days.push({
+      dateKey,
+      count,
+      weekdayIndex: date.getDay(),
+      weekdayShort: new Intl.DateTimeFormat('de-DE', { weekday: 'short' }).format(date),
+      label: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(date)
+    });
+  }
+
+  const maxCount = days.reduce((max, day) => Math.max(max, day.count), 0);
+  const thresholds = [
+    Math.max(1, Math.ceil(maxCount * 0.25)),
+    Math.max(1, Math.ceil(maxCount * 0.5)),
+    Math.max(1, Math.ceil(maxCount * 0.75))
+  ];
+
+  const daysWithLevel = days.map((day) => {
+    let level = 0;
+    if (day.count > 0) {
+      if (day.count <= thresholds[0]) {
+        level = 1;
+      } else if (day.count <= thresholds[1]) {
+        level = 2;
+      } else if (day.count <= thresholds[2]) {
+        level = 3;
+      } else {
+        level = 4;
+      }
+    }
+
+    return {
+      ...day,
+      level
+    };
+  });
+
+  const totalEvents = days.reduce((sum, day) => sum + day.count, 0);
+
+  return {
+    days: daysWithLevel,
+    maxCount,
+    totalEvents,
+    startLabel: days[0]?.label ?? '',
+    endLabel: days[days.length - 1]?.label ?? ''
+  };
+});
+
 onMounted(() => {
   refreshAll();
 });
@@ -305,7 +384,7 @@ onMounted(() => {
       <div v-if="activeTab === 'dashboard'" class="grid gap-4">
         <Card>
           <CardHeader>
-            <CardTitle>Uebersicht</CardTitle>
+            <CardTitle>Übersicht</CardTitle>
           </CardHeader>
           <CardContent>
             <div class="grid gap-3 md:grid-cols-2">
@@ -316,21 +395,64 @@ onMounted(() => {
                   <p class="text-sm text-slate-500">Eintraege</p>
                 </CardContent>
               </Card>
+
+              <Card class-name="bg-slate-50">
+                <CardContent class-name="pt-6">
+                  <p class="text-sm text-slate-500">Top 3</p>
+                  <ul v-if="topPeople.length > 0" class="mt-2 space-y-1 text-sm text-slate-700">
+                    <li v-for="(row, index) in topPeople" :key="row.id" class="flex items-center justify-between">
+                      <span>{{ index + 1 }}. {{ row.name }}</span>
+                      <span class="font-semibold">{{ row.count }}</span>
+                    </li>
+                  </ul>
+                  <p v-else class="mt-2 text-sm text-slate-500">Noch keine Eintraege vorhanden.</p>
+                </CardContent>
+              </Card>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Eintraege je Person</CardTitle>
+            <CardTitle>Zeitlicher Verlauf</CardTitle>
+            <CardDescription>
+              Letzte 2 Wochen als Heatmap. Dunkler bedeutet mehr Eintraege an einem Tag.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <ul class="divide-y divide-slate-200">
-              <li v-for="row in dashboard.perPerson" :key="row.id" class="flex items-center justify-between py-3">
-                <span class="font-medium text-slate-800">{{ row.name }}</span>
-                <span class="rounded-md bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-700">{{ row.count }}</span>
-              </li>
-            </ul>
+          <CardContent class-name="space-y-3">
+            <div class="w-full rounded-xl bg-slate-100/80 p-3">
+              <div class="grid w-full grid-cols-[repeat(14,minmax(0,1fr))] gap-2">
+                <div
+                  v-for="day in activityHeatmap.days"
+                  :key="day.dateKey"
+                  :class="[
+                    activityLevelClass(day.level),
+                    'flex h-10 w-full items-center justify-center rounded-md ring-1 ring-slate-300/40 transition-transform hover:scale-[1.04]'
+                  ]"
+                  :title="`${day.label}: ${day.count} Eintraege`"
+                >
+                  <span :class="[activityTextClass(day.level), 'text-xs font-semibold']">{{ day.weekdayShort }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-xs text-slate-500">
+              <span>{{ activityHeatmap.startLabel }}</span>
+              <span>{{ activityHeatmap.endLabel }}</span>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+              <p>{{ activityHeatmap.totalEvents }} Eintraege in den letzten 2 Wochen.</p>
+              <div class="flex items-center gap-2">
+                <span>Weniger</span>
+                <div class="h-3 w-3 rounded-[3px] bg-slate-200" />
+                <div class="h-3 w-3 rounded-[3px] bg-emerald-200" />
+                <div class="h-3 w-3 rounded-[3px] bg-emerald-300" />
+                <div class="h-3 w-3 rounded-[3px] bg-emerald-500" />
+                <div class="h-3 w-3 rounded-[3px] bg-emerald-700" />
+                <span>Mehr</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -368,6 +490,20 @@ onMounted(() => {
                   <p class="text-sm text-slate-500">{{ entry.bristolLabel }}</p>
                 </div>
                 <span class="text-xs text-slate-500">{{ formatDateTime(entry.happenedAt) }}</span>
+              </li>
+            </ul>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Eintraege je Person</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul class="divide-y divide-slate-200">
+              <li v-for="row in dashboard.perPerson" :key="row.id" class="flex items-center justify-between py-3">
+                <span class="font-medium text-slate-800">{{ row.name }}</span>
+                <span class="rounded-md bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-700">{{ row.count }}</span>
               </li>
             </ul>
           </CardContent>

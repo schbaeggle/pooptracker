@@ -180,6 +180,7 @@ app.post('/api/entries', (req, res) => {
 
 app.get('/api/dashboard', (_req, res) => {
   const totalEntries = db.prepare('SELECT COUNT(*) AS value FROM entries').get().value;
+  const heatmapDays = 14;
 
   const perPerson = db
     .prepare(
@@ -216,7 +217,29 @@ app.get('/api/dashboard', (_req, res) => {
     .all()
     .map(mapEntry);
 
-  res.json({ totalEntries, perPerson, byBristolType, latest });
+  const activityRaw = db
+    .prepare(
+      `SELECT date(happened_at) AS date, COUNT(*) AS count
+       FROM entries
+       WHERE date(happened_at) >= date('now', ?)
+       GROUP BY date(happened_at)
+       ORDER BY date ASC`
+    )
+    .all(`-${heatmapDays - 1} days`);
+
+  const activityMap = new Map(activityRaw.map((row) => [row.date, row.count]));
+  const activityDays = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = heatmapDays - 1; i >= 0; i -= 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() - i);
+    const dateKey = day.toISOString().slice(0, 10);
+    activityDays.push({ date: dateKey, count: activityMap.get(dateKey) ?? 0 });
+  }
+
+  res.json({ totalEntries, perPerson, byBristolType, latest, activityDays });
 });
 
 app.listen(port, () => {
