@@ -12,6 +12,8 @@ import Input from '@/components/ui/input/Input.vue';
 import Textarea from '@/components/ui/textarea/Textarea.vue';
 import Select from '@/components/ui/select/Select.vue';
 import DateTimePicker from '@/components/ui/datetime/DateTimePicker.vue';
+import { ChevronDown, ChevronUp } from 'lucide-vue-next';
+import bristolScaleImage from '@/assets/bristol-stool-scale.jpg';
 
 const activeTab = ref('track');
 const loading = ref(false);
@@ -41,6 +43,7 @@ const adminPinInput = ref('');
 const adminUnlocked = ref(false);
 const adminUnlockError = ref('');
 const adminUnlocking = ref(false);
+const showBristolInfo = ref(false);
 let adminUnlockDebounce = null;
 
 function formatDateTime(input) {
@@ -385,6 +388,30 @@ onMounted(() => {
               </option>
             </Select>
           </label>
+
+          <div class="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+            <button
+              type="button"
+              class="flex w-full items-center justify-between text-left text-sm font-semibold text-slate-700"
+              @click="showBristolInfo = !showBristolInfo"
+            >
+              <span>Was bedeuten die Bristol-Typen?</span>
+              <ChevronUp v-if="showBristolInfo" class="h-4 w-4" />
+              <ChevronDown v-else class="h-4 w-4" />
+            </button>
+
+            <div v-if="showBristolInfo" class="mt-3 space-y-2">
+              <p class="text-xs text-slate-600">
+                Die Grafik hilft bei der Einordnung der Stuhlformen von Typ 1 bis Typ 7.
+              </p>
+              <img
+                :src="bristolScaleImage"
+                alt="Bristol Stool Scale mit Erklaerung der Typen 1 bis 7"
+                class="w-full rounded-md border border-slate-200"
+                loading="lazy"
+              />
+            </div>
+          </div>
 
           <label class="grid gap-2 text-sm font-medium text-slate-700">
             <span>Bemerkung (optional)</span>
