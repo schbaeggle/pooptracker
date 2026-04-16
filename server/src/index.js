@@ -240,8 +240,25 @@ app.get('/api/dashboard', (_req, res) => {
     )
     .all(`-${heatmapDays - 1} days`);
 
+  const dailyBristolRaw = db
+    .prepare(
+      `SELECT
+         date(happened_at, 'localtime') AS date,
+         COUNT(*) AS count,
+         AVG(bristol_type) AS average_bristol_type
+       FROM entries
+       WHERE date(happened_at, 'localtime') >= date('now', 'localtime', ?)
+       GROUP BY date(happened_at, 'localtime')
+       ORDER BY date ASC`
+    )
+    .all(`-${heatmapDays - 1} days`);
+
   const activityMap = new Map(activityRaw.map((row) => [row.date, row.count]));
+  const dailyBristolMap = new Map(
+    dailyBristolRaw.map((row) => [row.date, { count: row.count, averageBristolType: row.average_bristol_type }])
+  );
   const activityDays = [];
+  const dailyBristolTrend = [];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -250,6 +267,13 @@ app.get('/api/dashboard', (_req, res) => {
     day.setDate(today.getDate() - i);
     const dateKey = day.toISOString().slice(0, 10);
     activityDays.push({ date: dateKey, count: activityMap.get(dateKey) ?? 0 });
+
+    const dailyBristol = dailyBristolMap.get(dateKey);
+    dailyBristolTrend.push({
+      date: dateKey,
+      count: dailyBristol?.count ?? 0,
+      averageBristolType: dailyBristol?.averageBristolType ?? null
+    });
   }
 
   res.json({
@@ -259,7 +283,8 @@ app.get('/api/dashboard', (_req, res) => {
     perPerson,
     byBristolType,
     latest,
-    activityDays
+    activityDays,
+    dailyBristolTrend
   });
 });
 

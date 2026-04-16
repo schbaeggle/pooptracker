@@ -39,7 +39,7 @@ const selectedDate = computed(() => parseDate(partsOrToday(props.modelValue)));
 
 const displayValue = computed(() => {
   if (!props.modelValue) {
-    return 'Datum waehlen';
+    return 'Datum wählen';
   }
 
   const date = parseDate(props.modelValue);

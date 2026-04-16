@@ -29,7 +29,8 @@ const dashboard = ref({
   perPerson: [],
   byBristolType: [],
   latest: [],
-  activityDays: []
+  activityDays: [],
+  dailyBristolTrend: []
 });
 
 const form = ref({
@@ -47,6 +48,7 @@ const adminUnlocked = ref(false);
 const adminUnlockError = ref('');
 const adminUnlocking = ref(false);
 const showBristolInfo = ref(false);
+const selectedTrendDate = ref('');
 let adminUnlockDebounce = null;
 
 function formatDateTime(input) {
@@ -95,7 +97,7 @@ async function submitEntry() {
 
   try {
     if (!form.value.personId) {
-      throw new Error('Bitte eine Person auswaehlen.');
+      throw new Error('Bitte eine Person auswählen.');
     }
 
     await api.addEntry({
@@ -134,7 +136,7 @@ async function addPerson(event) {
 
     await api.addPerson(nameValue, adminPinInput.value);
     newPersonName.value = '';
-    success.value = 'Name hinzugefuegt.';
+    success.value = 'Name hinzugefügt.';
     await loadPeople();
   } catch (e) {
     adminError.value = e.message;
@@ -239,6 +241,19 @@ const bristolDistribution = computed(() => {
     percent: Math.round((item.count / total) * 100)
   }));
 });
+
+function withoutUmlauts(value) {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/Ä/g, 'Ae')
+    .replace(/Ö/g, 'Oe')
+    .replace(/Ü/g, 'Ue')
+    .replace(/ß/g, 'ss');
+}
 
 const ratingHint = computed(() => {
   const current = Number(form.value.rating);
@@ -350,6 +365,66 @@ const activityHeatmap = computed(() => {
   };
 });
 
+const dailyBristolChart = computed(() => {
+  const source = Array.isArray(dashboard.value.dailyBristolTrend) ? dashboard.value.dailyBristolTrend : [];
+  if (source.length === 0) {
+    return { bars: [], linePoints: '', maxCount: 0, hasAverageData: false, selected: null };
+  }
+
+  const width = 560;
+  const height = 220;
+  const chartTop = 16;
+  const chartBottom = 180;
+  const barAreaHeight = chartBottom - chartTop;
+  const stepX = width / source.length;
+  const barWidth = Math.max(8, stepX * 0.62);
+  const maxCount = Math.max(...source.map((item) => item.count), 1);
+
+  const bars = source.map((item, index) => {
+    const centerX = index * stepX + stepX / 2;
+    const barHeight = item.count > 0 ? Math.max((item.count / maxCount) * barAreaHeight, 2) : 0;
+    return {
+      ...item,
+      x: centerX - barWidth / 2,
+      y: chartBottom - barHeight,
+      width: barWidth,
+      height: barHeight,
+      centerX,
+      label: new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit' }).format(new Date(item.date))
+    };
+  });
+
+  const lineData = bars
+    .filter((item) => Number.isFinite(Number(item.averageBristolType)))
+    .map((item) => {
+      const normalized = Number(item.averageBristolType) / 7;
+      const y = chartBottom - normalized * barAreaHeight;
+      return `${item.centerX},${y}`;
+    });
+
+  const selected = bars.find((item) => item.date === selectedTrendDate.value) ?? null;
+
+  return {
+    bars,
+    linePoints: lineData.join(' '),
+    maxCount,
+    hasAverageData: lineData.length > 0,
+    selected
+  };
+});
+
+function onTrendPointSelect(day) {
+  selectedTrendDate.value = day.date;
+}
+
+function trendAvgTypeY(day) {
+  const value = Number(day.averageBristolType);
+  if (!Number.isFinite(value)) {
+    return 180;
+  }
+  return 180 - (value / 7) * (180 - 16);
+}
+
 onMounted(() => {
   refreshAll();
 });
@@ -404,7 +479,7 @@ onMounted(() => {
           <label class="grid gap-2 text-sm font-medium text-slate-700">
             <span>Name</span>
             <Select v-model="form.personId">
-              <option disabled value="">Bitte waehlen</option>
+              <option disabled value="">Bitte wählen</option>
               <option v-for="person in people" :key="person.id" :value="String(person.id)">
                 {{ person.name }}
               </option>
@@ -433,7 +508,7 @@ onMounted(() => {
                 :key="star"
                 type="button"
                 class="rounded-md p-1 transition-colors hover:bg-slate-100"
-                :aria-label="`${star} Sterne waehlen`"
+                :aria-label="`${star} Sterne wählen`"
                 @click="form.rating = String(star)"
               >
                 <Star
@@ -462,7 +537,7 @@ onMounted(() => {
               </p>
               <img
                 :src="bristolScaleImage"
-                alt="Bristol Stool Scale mit Erklaerung der Typen 1 bis 7"
+                alt="Bristol Stool Scale mit Erklärung der Typen 1 bis 7"
                 class="w-full rounded-md border border-slate-200"
                 loading="lazy"
               />
@@ -489,7 +564,7 @@ onMounted(() => {
                 <CardContent class-name="pt-6">
                   <p class="text-sm text-slate-500">Gesamt</p>
                   <p class="text-4xl font-semibold tracking-tight text-slate-900">{{ dashboard.totalEntries }}</p>
-                  <p class="text-sm text-slate-500">Eintraege</p>
+                  <p class="text-sm text-slate-500">Einträge</p>
                 </CardContent>
               </Card>
 
@@ -502,7 +577,7 @@ onMounted(() => {
                       <span class="font-semibold">{{ row.count }}</span>
                     </li>
                   </ul>
-                  <p v-else class="mt-2 text-sm text-slate-500">Noch keine Eintraege vorhanden.</p>
+                  <p v-else class="mt-2 text-sm text-slate-500">Noch keine Einträge vorhanden.</p>
                 </CardContent>
               </Card>
 
@@ -529,7 +604,7 @@ onMounted(() => {
           <CardHeader>
             <CardTitle>Zeitlicher Verlauf</CardTitle>
             <CardDescription>
-              Letzte 2 Wochen als Heatmap. Dunkler bedeutet mehr Eintraege an einem Tag.
+              Letzte 2 Wochen als Heatmap. Dunkler bedeutet mehr Einträge an einem Tag.
             </CardDescription>
           </CardHeader>
           <CardContent class-name="space-y-3">
@@ -542,7 +617,7 @@ onMounted(() => {
                     activityLevelClass(day.level),
                     'flex h-10 w-full items-center justify-center rounded-md ring-1 ring-slate-300/40 transition-transform hover:scale-[1.04]'
                   ]"
-                  :title="`${day.label}: ${day.count} Eintraege`"
+                  :title="`${day.label}: ${day.count} Einträge`"
                 >
                   <span :class="[activityTextClass(day.level), 'text-xs font-semibold']">{{ day.weekdayShort }}</span>
                 </div>
@@ -555,7 +630,7 @@ onMounted(() => {
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-              <p>{{ activityHeatmap.totalEvents }} Eintraege in den letzten 2 Wochen.</p>
+              <p>{{ activityHeatmap.totalEvents }} Einträge in den letzten 2 Wochen.</p>
               <div class="flex items-center gap-2">
                 <span>Weniger</span>
                 <div class="h-3 w-3 rounded-[3px] bg-slate-200" />
@@ -571,13 +646,106 @@ onMounted(() => {
 
         <Card>
           <CardHeader>
+            <CardTitle>Einträge Pro Tag & Tages-Ø Bristol-Typ</CardTitle>
+            <CardDescription>
+              Balken zeigen Einträge pro Tag, die Linie zeigt den durchschnittlichen Bristol-Typ pro Tag.
+            </CardDescription>
+          </CardHeader>
+          <CardContent class-name="space-y-3">
+            <div class="rounded-xl bg-slate-100/80 p-3">
+              <svg viewBox="0 0 560 220" class="h-56 w-full">
+                <line x1="0" y1="180" x2="560" y2="180" class="stroke-slate-300" />
+
+                <rect
+                  v-for="bar in dailyBristolChart.bars"
+                  :key="`bar-${bar.date}`"
+                  :x="bar.x"
+                  :y="bar.y"
+                  :width="bar.width"
+                  :height="bar.height"
+                  rx="4"
+                  class="cursor-pointer fill-blue-300/90 hover:fill-blue-400/90"
+                  @mouseenter="onTrendPointSelect(bar)"
+                  @click="onTrendPointSelect(bar)"
+                >
+                  <title>{{ `${bar.label}: ${bar.count} Einträge` }}</title>
+                </rect>
+
+                <text
+                  v-for="bar in dailyBristolChart.bars"
+                  :key="`bar-label-${bar.date}`"
+                  :x="bar.centerX"
+                  :y="Math.max(12, bar.y - 4)"
+                  text-anchor="middle"
+                  class="fill-slate-600 text-[9px] font-semibold"
+                >
+                  {{ bar.count }}
+                </text>
+
+                <polyline
+                  v-if="dailyBristolChart.hasAverageData"
+                  :points="dailyBristolChart.linePoints"
+                  fill="none"
+                  stroke="#1d4ed8"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+
+                <circle
+                  v-for="bar in dailyBristolChart.bars.filter((item) => Number.isFinite(Number(item.averageBristolType)))"
+                  :key="`point-${bar.date}`"
+                  :cx="bar.centerX"
+                  :cy="trendAvgTypeY(bar)"
+                  r="3.3"
+                  class="cursor-pointer fill-blue-700"
+                  @mouseenter="onTrendPointSelect(bar)"
+                  @click="onTrendPointSelect(bar)"
+                >
+                  <title>{{ `${bar.label}: Ø Typ ${Number(bar.averageBristolType).toFixed(1)}` }}</title>
+                </circle>
+
+                <text
+                  v-for="bar in dailyBristolChart.bars.filter((item) => Number.isFinite(Number(item.averageBristolType)))"
+                  :key="`point-label-${bar.date}`"
+                  :x="bar.centerX"
+                  :y="Math.max(10, trendAvgTypeY(bar) - 7)"
+                  text-anchor="middle"
+                  class="fill-blue-700 text-[9px] font-semibold"
+                >
+                  {{ Number(bar.averageBristolType).toFixed(1) }}
+                </text>
+              </svg>
+            </div>
+
+            <p v-if="dailyBristolChart.selected" class="text-xs text-slate-600">
+              {{ dailyBristolChart.selected.label }}: {{ dailyBristolChart.selected.count }} Einträge,
+              Tages-Ø Typ {{ Number(dailyBristolChart.selected.averageBristolType || 0).toFixed(1) }}
+            </p>
+
+            <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+              <div class="flex items-center gap-2">
+                <span class="inline-block h-3 w-3 rounded-[3px] bg-blue-300" />
+                <span>Einträge pro Tag</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="inline-block h-[2px] w-5 bg-blue-700" />
+                <span>Tages-Ø Bristol-Typ</span>
+              </div>
+              <span>Max. Einträge/Tag: {{ dailyBristolChart.maxCount }}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Bristol-Verteilung</CardTitle>
           </CardHeader>
           <CardContent>
             <ul class="space-y-3">
               <li v-for="item in bristolDistribution" :key="item.type" class="space-y-1.5">
                 <div class="flex items-center justify-between gap-4 text-sm">
-                  <span class="text-slate-700">{{ item.label }}</span>
+                  <span class="text-slate-700">{{ withoutUmlauts(item.label) }}</span>
                   <span class="font-semibold text-slate-800">{{ item.count }} ({{ item.percent }}%)</span>
                 </div>
                 <div class="h-2 rounded-full bg-slate-200">
@@ -593,7 +761,7 @@ onMounted(() => {
 
         <Card>
           <CardHeader>
-            <CardTitle>Letzte Eintraege</CardTitle>
+            <CardTitle>Letzte Einträge</CardTitle>
           </CardHeader>
           <CardContent>
             <ul class="divide-y divide-slate-200">
@@ -619,7 +787,7 @@ onMounted(() => {
 
         <Card>
           <CardHeader>
-            <CardTitle>Eintraege je Person</CardTitle>
+            <CardTitle>Einträge je Person</CardTitle>
           </CardHeader>
           <CardContent>
             <ul class="divide-y divide-slate-200">
@@ -638,7 +806,7 @@ onMounted(() => {
         </CardHeader>
         <CardContent class-name="space-y-4">
           <div v-if="!adminUnlocked" class="space-y-3">
-            <p class="text-sm text-slate-600">Admin-Bereich ist geschuetzt. Bitte 4-stellige PIN eingeben.</p>
+            <p class="text-sm text-slate-600">Admin-Bereich ist geschützt. Bitte 4-stellige PIN eingeben.</p>
             <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
               <Input
                 v-model="adminPinInput"
@@ -649,9 +817,9 @@ onMounted(() => {
                 placeholder="PIN"
               />
             </div>
-            <p class="text-xs text-slate-500">Nach Eingabe der 4. Ziffer wird automatisch geprueft.</p>
+            <p class="text-xs text-slate-500">Nach Eingabe der 4. Ziffer wird automatisch geprüft.</p>
             <p v-if="adminUnlockError" class="text-sm text-red-700">{{ adminUnlockError }}</p>
-            <p v-else-if="adminUnlocking" class="text-sm text-slate-600">PIN wird geprueft...</p>
+            <p v-else-if="adminUnlocking" class="text-sm text-slate-600">PIN wird geprüft...</p>
           </div>
 
           <template v-else>
@@ -663,7 +831,7 @@ onMounted(() => {
                   placeholder="Neuer Name" 
                   class="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50" 
                 />
-                <button type="submit" class="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50">Hinzufuegen</button>
+                <button type="submit" class="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50">Hinzufügen</button>
               </div>
             </form>
 
