@@ -21,6 +21,7 @@ db.exec(`
     person_id INTEGER NOT NULL,
     happened_at TEXT NOT NULL,
     bristol_type INTEGER NOT NULL CHECK (bristol_type BETWEEN 1 AND 7),
+    rating INTEGER NOT NULL DEFAULT 3 CHECK (rating BETWEEN 1 AND 5),
     note TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
@@ -28,6 +29,11 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_entries_happened_at ON entries(happened_at DESC);
 `);
+
+const entryColumns = db.prepare('PRAGMA table_info(entries)').all();
+if (!entryColumns.some((column) => column.name === 'rating')) {
+  db.exec('ALTER TABLE entries ADD COLUMN rating INTEGER NOT NULL DEFAULT 3 CHECK (rating BETWEEN 1 AND 5)');
+}
 
 const seedPeople = ['Alex', 'Mia', 'Sam'];
 const countPeople = db.prepare('SELECT COUNT(*) AS count FROM people').get().count;

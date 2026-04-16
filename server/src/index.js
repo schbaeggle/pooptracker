@@ -43,6 +43,7 @@ function mapEntry(row) {
     happenedAt: row.happened_at,
     bristolType: row.bristol_type,
     bristolLabel: bristolLabels[row.bristol_type],
+    rating: row.rating ?? 3,
     note: row.note ?? ''
   };
 }
@@ -129,7 +130,7 @@ app.delete('/api/people/:id', requireAdminPin, (req, res) => {
 app.get('/api/entries', (_req, res) => {
   const rows = db
     .prepare(
-      `SELECT e.id, e.person_id, p.name AS person_name, e.happened_at, e.bristol_type, e.note
+      `SELECT e.id, e.person_id, p.name AS person_name, e.happened_at, e.bristol_type, e.rating, e.note
        FROM entries e
        JOIN people p ON p.id = e.person_id
        ORDER BY datetime(e.happened_at) DESC
@@ -144,6 +145,7 @@ app.post('/api/entries', (req, res) => {
   const personId = Number(req.body?.personId);
   const happenedAt = String(req.body?.happenedAt || '').trim();
   const bristolType = Number(req.body?.bristolType);
+  const rating = Number(req.body?.rating);
   const noteRaw = req.body?.note;
   const note = typeof noteRaw === 'string' ? noteRaw.trim() : '';
 
@@ -159,6 +161,10 @@ app.post('/api/entries', (req, res) => {
     return res.status(400).json({ error: 'Bristol-Typ muss zwischen 1 und 7 liegen.' });
   }
 
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Bewertung muss zwischen 1 und 5 Sternen liegen.' });
+  }
+
   const person = db.prepare('SELECT id FROM people WHERE id = ?').get(personId);
   if (!person) {
     return res.status(404).json({ error: 'Person nicht gefunden.' });
@@ -166,13 +172,13 @@ app.post('/api/entries', (req, res) => {
 
   const result = db
     .prepare(
-      'INSERT INTO entries(person_id, happened_at, bristol_type, note) VALUES (?, ?, ?, ?)'
+      'INSERT INTO entries(person_id, happened_at, bristol_type, rating, note) VALUES (?, ?, ?, ?, ?)'
     )
-    .run(personId, happenedAt, bristolType, note || null);
+    .run(personId, happenedAt, bristolType, rating, note || null);
 
   const created = db
     .prepare(
-      `SELECT e.id, e.person_id, p.name AS person_name, e.happened_at, e.bristol_type, e.note
+      `SELECT e.id, e.person_id, p.name AS person_name, e.happened_at, e.bristol_type, e.rating, e.note
        FROM entries e
        JOIN people p ON p.id = e.person_id
        WHERE e.id = ?`
@@ -185,6 +191,9 @@ app.post('/api/entries', (req, res) => {
 app.get('/api/dashboard', (_req, res) => {
   const totalEntries = db.prepare('SELECT COUNT(*) AS value FROM entries').get().value;
   const heatmapDays = 14;
+  const averages = db
+    .prepare('SELECT AVG(bristol_type) AS avg_bristol_type, AVG(rating) AS avg_rating FROM entries')
+    .get();
 
   const perPerson = db
     .prepare(
@@ -212,7 +221,7 @@ app.get('/api/dashboard', (_req, res) => {
 
   const latest = db
     .prepare(
-      `SELECT e.id, e.person_id, p.name AS person_name, e.happened_at, e.bristol_type, e.note
+      `SELECT e.id, e.person_id, p.name AS person_name, e.happened_at, e.bristol_type, e.rating, e.note
        FROM entries e
        JOIN people p ON p.id = e.person_id
        ORDER BY datetime(e.happened_at) DESC
@@ -223,10 +232,10 @@ app.get('/api/dashboard', (_req, res) => {
 
   const activityRaw = db
     .prepare(
-      `SELECT date(happened_at) AS date, COUNT(*) AS count
+      `SELECT date(happened_at, 'localtime') AS date, COUNT(*) AS count
        FROM entries
-       WHERE date(happened_at) >= date('now', ?)
-       GROUP BY date(happened_at)
+       WHERE date(happened_at, 'localtime') >= date('now', 'localtime', ?)
+       GROUP BY date(happened_at, 'localtime')
        ORDER BY date ASC`
     )
     .all(`-${heatmapDays - 1} days`);
@@ -243,7 +252,15 @@ app.get('/api/dashboard', (_req, res) => {
     activityDays.push({ date: dateKey, count: activityMap.get(dateKey) ?? 0 });
   }
 
-  res.json({ totalEntries, perPerson, byBristolType, latest, activityDays });
+  res.json({
+    totalEntries,
+    averageBristolType: averages?.avg_bristol_type ?? null,
+    averageRating: averages?.avg_rating ?? null,
+    perPerson,
+    byBristolType,
+    latest,
+    activityDays
+  });
 });
 
 // Static file serving and SPA fallback (must come AFTER API routes)

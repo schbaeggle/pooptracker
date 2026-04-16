@@ -12,7 +12,7 @@ import Input from '@/components/ui/input/Input.vue';
 import Textarea from '@/components/ui/textarea/Textarea.vue';
 import Select from '@/components/ui/select/Select.vue';
 import DateTimePicker from '@/components/ui/datetime/DateTimePicker.vue';
-import { ChevronDown, ChevronUp } from 'lucide-vue-next';
+import { ChevronDown, ChevronUp, Star } from 'lucide-vue-next';
 import bristolScaleImage from '@/assets/bristol-stool-scale.jpg';
 
 const activeTab = ref('track');
@@ -24,6 +24,8 @@ const people = ref([]);
 const entries = ref([]);
 const dashboard = ref({
   totalEntries: 0,
+  averageBristolType: null,
+  averageRating: null,
   perPerson: [],
   byBristolType: [],
   latest: [],
@@ -34,6 +36,7 @@ const form = ref({
   personId: '',
   happenedAt: new Date().toISOString(),
   bristolType: '4',
+  rating: '3',
   note: ''
 });
 
@@ -99,6 +102,7 @@ async function submitEntry() {
       personId: Number(form.value.personId),
       happenedAt: new Date(form.value.happenedAt).toISOString(),
       bristolType: Number(form.value.bristolType),
+      rating: Number(form.value.rating),
       note: form.value.note
     });
 
@@ -236,7 +240,32 @@ const bristolDistribution = computed(() => {
   }));
 });
 
+const ratingHint = computed(() => {
+  const current = Number(form.value.rating);
+  if (current === 1) return '1 Stern: schlechter, schmerzhafter Schiss';
+  if (current === 2) return '2 Sterne: eher unangenehm';
+  if (current === 3) return '3 Sterne: okay';
+  if (current === 4) return '4 Sterne: gut';
+  return '5 Sterne: herrlicher Schiss';
+});
+
 const topPeople = computed(() => dashboard.value.perPerson.filter((row) => row.count > 0).slice(0, 3));
+
+const averageBristolTypeLabel = computed(() => {
+  const value = Number(dashboard.value.averageBristolType);
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  return value.toFixed(1);
+});
+
+const averageRatingLabel = computed(() => {
+  const value = Number(dashboard.value.averageRating);
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  return value.toFixed(1);
+});
 
 function activityLevelClass(level) {
   if (level <= 0) return 'bg-slate-200';
@@ -248,6 +277,13 @@ function activityLevelClass(level) {
 
 function activityTextClass(level) {
   return level >= 3 ? 'text-white/95' : 'text-slate-700';
+}
+
+function toLocalDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 const activityHeatmap = computed(() => {
@@ -264,7 +300,7 @@ const activityHeatmap = computed(() => {
   for (let i = 0; i < totalDays; i += 1) {
     const date = new Date(start);
     date.setDate(start.getDate() + i);
-    const dateKey = date.toISOString().slice(0, 10);
+    const dateKey = toLocalDateKey(date);
     const count = countByDate.get(dateKey) ?? 0;
 
     days.push({
@@ -389,6 +425,26 @@ onMounted(() => {
             </Select>
           </label>
 
+          <div class="grid gap-2 text-sm font-medium text-slate-700">
+            <span>Bewertung</span>
+            <div class="flex items-center gap-1">
+              <button
+                v-for="star in 5"
+                :key="star"
+                type="button"
+                class="rounded-md p-1 transition-colors hover:bg-slate-100"
+                :aria-label="`${star} Sterne waehlen`"
+                @click="form.rating = String(star)"
+              >
+                <Star
+                  class="h-6 w-6"
+                  :class="Number(form.rating) >= star ? 'fill-amber-400 text-amber-400' : 'text-slate-300'"
+                />
+              </button>
+            </div>
+            <p class="text-xs text-slate-600">{{ ratingHint }}</p>
+          </div>
+
           <div class="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
             <button
               type="button"
@@ -447,6 +503,22 @@ onMounted(() => {
                     </li>
                   </ul>
                   <p v-else class="mt-2 text-sm text-slate-500">Noch keine Eintraege vorhanden.</p>
+                </CardContent>
+              </Card>
+
+              <Card class-name="bg-slate-50">
+                <CardContent class-name="pt-6">
+                  <p class="text-sm text-slate-500">Durchschnittlicher Typ</p>
+                  <p class="text-4xl font-semibold tracking-tight text-slate-900">{{ averageBristolTypeLabel }}</p>
+                  <p class="text-sm text-slate-500">Bristol-Skala (1 bis 7)</p>
+                </CardContent>
+              </Card>
+
+              <Card class-name="bg-slate-50">
+                <CardContent class-name="pt-6">
+                  <p class="text-sm text-slate-500">Durchschnittliche Bewertung</p>
+                  <p class="text-4xl font-semibold tracking-tight text-slate-900">{{ averageRatingLabel }}</p>
+                  <p class="text-sm text-slate-500">Sterne (1 bis 5)</p>
                 </CardContent>
               </Card>
             </div>
@@ -529,6 +601,15 @@ onMounted(() => {
                 <div>
                   <p class="font-semibold text-slate-800">{{ entry.personName }}</p>
                   <p class="text-sm text-slate-500">{{ entry.bristolLabel }}</p>
+                  <p v-if="entry.note" class="mt-1 text-xs text-slate-500">Bemerkung: {{ entry.note }}</p>
+                  <div class="mt-1 flex items-center gap-0.5">
+                    <Star
+                      v-for="star in 5"
+                      :key="`latest-${entry.id}-star-${star}`"
+                      class="h-4 w-4"
+                      :class="Number(entry.rating) >= star ? 'fill-amber-400 text-amber-400' : 'text-slate-300'"
+                    />
+                  </div>
                 </div>
                 <span class="text-xs text-slate-500">{{ formatDateTime(entry.happenedAt) }}</span>
               </li>
