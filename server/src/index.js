@@ -35,6 +35,68 @@ const bristolLabels = {
   7: 'Typ 7 - fluessig'
 };
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseYmdToLocalDate(value) {
+  if (!DATE_RE.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function toLocalDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getDashboardRange() {
+  const settingsRows = db
+    .prepare(
+      `SELECT setting_key, setting_value
+       FROM app_settings
+       WHERE setting_key IN ('dashboard_start_date', 'dashboard_end_date')`
+    )
+    .all();
+
+  const settings = Object.fromEntries(
+    settingsRows.map((row) => [row.setting_key, row.setting_value])
+  );
+
+  const parsedStart = parseYmdToLocalDate(settings.dashboard_start_date || '');
+  const parsedEnd = parseYmdToLocalDate(settings.dashboard_end_date || '');
+
+  if (parsedStart && parsedEnd && parsedStart <= parsedEnd) {
+    return {
+      startDate: toLocalDateKey(parsedStart),
+      endDate: toLocalDateKey(parsedEnd)
+    };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const fallbackStart = new Date(today);
+  fallbackStart.setDate(today.getDate() - 13);
+
+  return {
+    startDate: toLocalDateKey(fallbackStart),
+    endDate: toLocalDateKey(today)
+  };
+}
+
 function mapEntry(row) {
   return {
     id: row.id,
@@ -86,6 +148,38 @@ app.post('/api/admin/verify', (req, res) => {
   }
 
   return res.json({ ok: true });
+});
+
+app.put('/api/admin/dashboard-range', requireAdminPin, (req, res) => {
+  const startDate = String(req.body?.startDate || '').trim();
+  const endDate = String(req.body?.endDate || '').trim();
+
+  const parsedStart = parseYmdToLocalDate(startDate);
+  const parsedEnd = parseYmdToLocalDate(endDate);
+
+  if (!parsedStart || !parsedEnd) {
+    return res.status(400).json({ error: 'Start- und Enddatum sind erforderlich (YYYY-MM-DD).' });
+  }
+
+  if (parsedStart > parsedEnd) {
+    return res.status(400).json({ error: 'Startdatum darf nicht nach dem Enddatum liegen.' });
+  }
+
+  const upsertSetting = db.prepare(
+    `INSERT INTO app_settings(setting_key, setting_value)
+     VALUES (?, ?)
+     ON CONFLICT(setting_key) DO UPDATE
+     SET setting_value = excluded.setting_value,
+         updated_at = CURRENT_TIMESTAMP`
+  );
+
+  const tx = db.transaction(() => {
+    upsertSetting.run('dashboard_start_date', startDate);
+    upsertSetting.run('dashboard_end_date', endDate);
+  });
+  tx();
+
+  return res.json({ startDate, endDate });
 });
 
 app.get('/api/people', (_req, res) => {
@@ -189,30 +283,46 @@ app.post('/api/entries', (req, res) => {
 });
 
 app.get('/api/dashboard', (_req, res) => {
-  const totalEntries = db.prepare('SELECT COUNT(*) AS value FROM entries').get().value;
-  const heatmapDays = 14;
+  const { startDate, endDate } = getDashboardRange();
+  const startLocal = parseYmdToLocalDate(startDate);
+  const endLocal = parseYmdToLocalDate(endDate);
   const averages = db
-    .prepare('SELECT AVG(bristol_type) AS avg_bristol_type, AVG(rating) AS avg_rating FROM entries')
-    .get();
+    .prepare(
+      `SELECT AVG(bristol_type) AS avg_bristol_type, AVG(rating) AS avg_rating
+       FROM entries
+       WHERE date(happened_at, 'localtime') BETWEEN ? AND ?`
+    )
+    .get(startDate, endDate);
+
+  const totalEntriesInRange = db
+    .prepare(
+      `SELECT COUNT(*) AS value
+       FROM entries
+       WHERE date(happened_at, 'localtime') BETWEEN ? AND ?`
+    )
+    .get(startDate, endDate).value;
 
   const perPerson = db
     .prepare(
       `SELECT p.id, p.name, COUNT(e.id) AS count
        FROM people p
-       LEFT JOIN entries e ON e.person_id = p.id
+       LEFT JOIN entries e
+         ON e.person_id = p.id
+        AND date(e.happened_at, 'localtime') BETWEEN ? AND ?
        GROUP BY p.id, p.name
        ORDER BY count DESC, p.name ASC`
     )
-    .all();
+    .all(startDate, endDate);
 
   const byBristolType = db
     .prepare(
       `SELECT bristol_type AS type, COUNT(*) AS count
        FROM entries
+       WHERE date(happened_at, 'localtime') BETWEEN ? AND ?
        GROUP BY bristol_type
        ORDER BY bristol_type ASC`
     )
-    .all()
+     .all(startDate, endDate)
     .map((row) => ({
       type: row.type,
       label: bristolLabels[row.type],
@@ -224,21 +334,22 @@ app.get('/api/dashboard', (_req, res) => {
       `SELECT e.id, e.person_id, p.name AS person_name, e.happened_at, e.bristol_type, e.rating, e.note
        FROM entries e
        JOIN people p ON p.id = e.person_id
+       WHERE date(e.happened_at, 'localtime') BETWEEN ? AND ?
        ORDER BY datetime(e.happened_at) DESC
        LIMIT 10`
     )
-    .all()
+     .all(startDate, endDate)
     .map(mapEntry);
 
   const activityRaw = db
     .prepare(
       `SELECT date(happened_at, 'localtime') AS date, COUNT(*) AS count
        FROM entries
-       WHERE date(happened_at, 'localtime') >= date('now', 'localtime', ?)
+       WHERE date(happened_at, 'localtime') BETWEEN ? AND ?
        GROUP BY date(happened_at, 'localtime')
        ORDER BY date ASC`
     )
-    .all(`-${heatmapDays - 1} days`);
+     .all(startDate, endDate);
 
   const dailyBristolRaw = db
     .prepare(
@@ -247,11 +358,11 @@ app.get('/api/dashboard', (_req, res) => {
          COUNT(*) AS count,
          AVG(bristol_type) AS average_bristol_type
        FROM entries
-       WHERE date(happened_at, 'localtime') >= date('now', 'localtime', ?)
+       WHERE date(happened_at, 'localtime') BETWEEN ? AND ?
        GROUP BY date(happened_at, 'localtime')
        ORDER BY date ASC`
     )
-    .all(`-${heatmapDays - 1} days`);
+     .all(startDate, endDate);
 
   const activityMap = new Map(activityRaw.map((row) => [row.date, row.count]));
   const dailyBristolMap = new Map(
@@ -259,13 +370,11 @@ app.get('/api/dashboard', (_req, res) => {
   );
   const activityDays = [];
   const dailyBristolTrend = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const rangeStart = startLocal || new Date();
+  const rangeEnd = endLocal || new Date();
 
-  for (let i = heatmapDays - 1; i >= 0; i -= 1) {
-    const day = new Date(today);
-    day.setDate(today.getDate() - i);
-    const dateKey = day.toISOString().slice(0, 10);
+  for (let day = new Date(rangeStart); day <= rangeEnd; day.setDate(day.getDate() + 1)) {
+    const dateKey = toLocalDateKey(day);
     activityDays.push({ date: dateKey, count: activityMap.get(dateKey) ?? 0 });
 
     const dailyBristol = dailyBristolMap.get(dateKey);
@@ -277,9 +386,11 @@ app.get('/api/dashboard', (_req, res) => {
   }
 
   res.json({
-    totalEntries,
+    totalEntries: totalEntriesInRange,
     averageBristolType: averages?.avg_bristol_type ?? null,
     averageRating: averages?.avg_rating ?? null,
+    rangeStartDate: startDate,
+    rangeEndDate: endDate,
     perPerson,
     byBristolType,
     latest,

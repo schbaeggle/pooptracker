@@ -26,6 +26,8 @@ const dashboard = ref({
   totalEntries: 0,
   averageBristolType: null,
   averageRating: null,
+  rangeStartDate: '',
+  rangeEndDate: '',
   perPerson: [],
   byBristolType: [],
   latest: [],
@@ -49,6 +51,9 @@ const adminUnlockError = ref('');
 const adminUnlocking = ref(false);
 const showBristolInfo = ref(false);
 const selectedTrendDate = ref('');
+const dashboardRangeStart = ref('');
+const dashboardRangeEnd = ref('');
+const rangeError = ref('');
 let adminUnlockDebounce = null;
 
 function formatDateTime(input) {
@@ -143,6 +148,28 @@ async function addPerson(event) {
     if (String(e.message).toLowerCase().includes('pin')) {
       adminUnlocked.value = false;
     }
+  }
+}
+
+async function saveDashboardRange() {
+  rangeError.value = '';
+  adminError.value = '';
+  success.value = '';
+
+  try {
+    if (!dashboardRangeStart.value || !dashboardRangeEnd.value) {
+      throw new Error('Bitte Start- und Enddatum angeben.');
+    }
+
+    if (dashboardRangeStart.value > dashboardRangeEnd.value) {
+      throw new Error('Startdatum darf nicht nach dem Enddatum liegen.');
+    }
+
+    await api.updateDashboardRange(dashboardRangeStart.value, dashboardRangeEnd.value, adminPinInput.value);
+    success.value = 'Betrachtungszeitraum gespeichert.';
+    await loadDashboard();
+  } catch (e) {
+    rangeError.value = e.message;
   }
 }
 
@@ -301,30 +328,38 @@ function toLocalDateKey(date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatYmdDate(value) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return '-';
+  }
+
+  const [year, month, day] = value.split('-').map(Number);
+  return new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(new Date(year, month - 1, day));
+}
+
 const activityHeatmap = computed(() => {
-  const totalDays = 14;
   const sourceDays = Array.isArray(dashboard.value.activityDays) ? dashboard.value.activityDays : [];
-  const countByDate = new Map(sourceDays.map((item) => [item.date, item.count]));
+  const days = sourceDays.map((item) => {
+    const [year, month, day] = item.date.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const start = new Date(today);
-  start.setDate(today.getDate() - (totalDays - 1));
-
-  const days = [];
-  for (let i = 0; i < totalDays; i += 1) {
-    const date = new Date(start);
-    date.setDate(start.getDate() + i);
-    const dateKey = toLocalDateKey(date);
-    const count = countByDate.get(dateKey) ?? 0;
-
-    days.push({
-      dateKey,
-      count,
+    return {
+      dateKey: item.date,
+      count: item.count,
       weekdayIndex: date.getDay(),
       weekdayShort: new Intl.DateTimeFormat('de-DE', { weekday: 'short' }).format(date),
       label: new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' }).format(date)
-    });
+    };
+  });
+
+  if (days.length === 0) {
+    return {
+      days: [],
+      maxCount: 0,
+      totalEvents: 0,
+      startLabel: '',
+      endLabel: ''
+    };
   }
 
   const maxCount = days.reduce((max, day) => Math.max(max, day.count), 0);
@@ -365,6 +400,15 @@ const activityHeatmap = computed(() => {
   };
 });
 
+const dashboardRangeLabel = computed(() => {
+  const start = formatYmdDate(dashboard.value.rangeStartDate);
+  const end = formatYmdDate(dashboard.value.rangeEndDate);
+  if (start === '-' || end === '-') {
+    return 'Kein Zeitraum gesetzt';
+  }
+  return `${start} bis ${end}`;
+});
+
 const dailyBristolChart = computed(() => {
   const source = Array.isArray(dashboard.value.dailyBristolTrend) ? dashboard.value.dailyBristolTrend : [];
   if (source.length === 0) {
@@ -383,6 +427,8 @@ const dailyBristolChart = computed(() => {
   const bars = source.map((item, index) => {
     const centerX = index * stepX + stepX / 2;
     const barHeight = item.count > 0 ? Math.max((item.count / maxCount) * barAreaHeight, 2) : 0;
+    const [year, month, day] = item.date.split('-').map(Number);
+    const itemDate = new Date(year, month - 1, day);
     return {
       ...item,
       x: centerX - barWidth / 2,
@@ -390,7 +436,7 @@ const dailyBristolChart = computed(() => {
       width: barWidth,
       height: barHeight,
       centerX,
-      label: new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit' }).format(new Date(item.date))
+      label: new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit' }).format(itemDate)
     };
   });
 
@@ -424,6 +470,15 @@ function trendAvgTypeY(day) {
   }
   return 180 - (value / 7) * (180 - 16);
 }
+
+watch(
+  () => [dashboard.value.rangeStartDate, dashboard.value.rangeEndDate],
+  ([startDate, endDate]) => {
+    dashboardRangeStart.value = startDate || '';
+    dashboardRangeEnd.value = endDate || '';
+  },
+  { immediate: true }
+);
 
 onMounted(() => {
   refreshAll();
@@ -557,6 +612,7 @@ onMounted(() => {
         <Card>
           <CardHeader>
             <CardTitle>Übersicht</CardTitle>
+            <CardDescription>Zeitraum: {{ dashboardRangeLabel }}</CardDescription>
           </CardHeader>
           <CardContent>
             <div class="grid gap-3 md:grid-cols-2">
@@ -604,7 +660,7 @@ onMounted(() => {
           <CardHeader>
             <CardTitle>Zeitlicher Verlauf</CardTitle>
             <CardDescription>
-              Letzte 2 Wochen als Heatmap. Dunkler bedeutet mehr Einträge an einem Tag.
+              Heatmap für den gewählten Zeitraum. Dunkler bedeutet mehr Einträge an einem Tag.
             </CardDescription>
           </CardHeader>
           <CardContent class-name="space-y-3">
@@ -630,7 +686,7 @@ onMounted(() => {
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-              <p>{{ activityHeatmap.totalEvents }} Einträge in den letzten 2 Wochen.</p>
+              <p>{{ activityHeatmap.totalEvents }} Einträge im gewählten Zeitraum.</p>
               <div class="flex items-center gap-2">
                 <span>Weniger</span>
                 <div class="h-3 w-3 rounded-[3px] bg-slate-200" />
@@ -823,6 +879,22 @@ onMounted(() => {
           </div>
 
           <template v-else>
+            <div class="space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+              <p class="text-sm font-semibold text-slate-700">Betrachtungszeitraum fürs Dashboard</p>
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label class="grid gap-1 text-xs text-slate-600">
+                  <span>Startdatum</span>
+                  <Input v-model="dashboardRangeStart" type="date" />
+                </label>
+                <label class="grid gap-1 text-xs text-slate-600">
+                  <span>Enddatum</span>
+                  <Input v-model="dashboardRangeEnd" type="date" />
+                </label>
+              </div>
+              <Button variant="secondary" @click="saveDashboardRange">Zeitraum speichern</Button>
+              <p v-if="rangeError" class="text-sm text-red-700">{{ rangeError }}</p>
+            </div>
+
             <form @submit.prevent="addPerson" class="space-y-3">
               <div class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
                 <input 
